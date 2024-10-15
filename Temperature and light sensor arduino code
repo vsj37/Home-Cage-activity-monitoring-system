@@ -1,0 +1,105 @@
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include "Adafruit_TSL2591.h"
+#include <Adafruit_BME280.h>
+
+// TSL2591 setup
+Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
+
+// BME280 setup
+Adafruit_BME280 bme; // I2C
+
+#define SEALEVELPRESSURE_HPA (1013.25)
+
+void displaySensorDetails(void) {
+    sensor_t sensor;
+    tsl.getSensor(&sensor);
+    Serial.println(F("------------------------------------"));
+    Serial.print(F("Sensor:       ")); Serial.println(sensor.name);
+    Serial.print(F("Driver Ver:   ")); Serial.println(sensor.version);
+    Serial.print(F("Unique ID:    ")); Serial.println(sensor.sensor_id);
+    Serial.print(F("Max Value:    ")); Serial.print(sensor.max_value); Serial.println(F(" lux"));
+    Serial.print(F("Min Value:    ")); Serial.print(sensor.min_value); Serial.println(F(" lux"));
+    Serial.print(F("Resolution:   ")); Serial.print(sensor.resolution, 4); Serial.println(F(" lux"));
+    Serial.println(F("------------------------------------"));
+    Serial.println(F(""));
+    delay(500);
+}
+
+void configureSensor(void) {
+    tsl.setGain(TSL2591_GAIN_MED);      // 25x gain
+    tsl.setTiming(TSL2591_INTEGRATIONTIME_300MS);
+
+    Serial.println(F("------------------------------------"));
+    Serial.print(F("Gain:         "));
+    tsl2591Gain_t gain = tsl.getGain();
+    switch(gain) {
+        case TSL2591_GAIN_LOW: Serial.println(F("1x (Low)")); break;
+        case TSL2591_GAIN_MED: Serial.println(F("25x (Medium)")); break;
+        case TSL2591_GAIN_HIGH: Serial.println(F("428x (High)")); break;
+        case TSL2591_GAIN_MAX: Serial.println(F("9876x (Max)")); break;
+    }
+    Serial.print(F("Timing:       "));
+    Serial.print((tsl.getTiming() + 1) * 100, DEC);
+    Serial.println(F(" ms"));
+    Serial.println(F("------------------------------------"));
+    Serial.println(F(""));
+}
+
+void setup() {
+    Serial.begin(9600);
+    while (!Serial);  // Wait for Serial to initialize
+
+    // Initialize BME280
+   
+    unsigned status = bme.begin();
+    if (!status) {
+        Serial.println("Could not find a valid BME280 sensor, check wiring, address, sensor ID!");
+        while (1) delay(10);
+    }
+
+    // Initialize TSL2591
+    Serial.println(F("Starting Adafruit TSL2591 Test!"));
+    if (tsl.begin()) {
+        Serial.println(F("Found a TSL2591 sensor"));
+    } else {
+        Serial.println(F("No sensor found ... check your wiring?"));
+        while (1);
+    }
+   
+    displaySensorDetails();
+    configureSensor();
+}
+
+void loop() {
+
+    // Read and display values from BME280
+    float temperature = bme.readTemperature();
+    float pressure = bme.readPressure() / 100.0F;
+    float altitude = bme.readAltitude(SEALEVELPRESSURE_HPA);
+    float humidity = bme.readHumidity();
+
+    // Read and display values from TSL2591
+    uint32_t lum = tsl.getFullLuminosity();
+    uint16_t ir = lum >> 16;
+    uint16_t full = lum & 0xFFFF;
+
+    // Prepare CSV output
+    Serial.print(temperature);
+    Serial.print(",");
+    Serial.print(pressure);
+    Serial.print(",");
+    Serial.print(altitude);
+    Serial.print(",");
+    Serial.print(humidity);
+    Serial.print(",");
+    Serial.print(ir);
+    Serial.print(",");
+    Serial.print(full);
+    Serial.print(",");
+    Serial.print(full - ir);
+    Serial.print(",");
+    Serial.println(tsl.calculateLux(full, ir), 6);  // Last value with 6 decimal places
+
+    delay(1000);  // Delay between readings
+}
