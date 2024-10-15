@@ -1,0 +1,154 @@
+import time
+import serial
+from picamera2 import Picamera2, Preview
+import numpy as np
+import csv
+from picamera2.encoders import H264Encoder
+from picamera2.outputs import CircularOutput
+import RPi.GPIO as GPIO
+import threading  # Import threading module for parallel execution
+
+# Initialize global variables for the encoder
+encoder0Pos = 0
+encoderA = 17  # GPIO pin for encoder A
+encoderB = 18  # GPIO pin for encoder B
+encoderPinALast = GPIO.LOW  # Last state of encoder A
+
+# Setup GPIO for the encoder
+GPIO.setmode(GPIO.BCM)  # Use BCM numbering
+GPIO.setup(encoderA, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Set encoder A pin as input
+GPIO.setup(encoderB, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Set encoder B pin as input
+
+# Initialize camera and serial communication
+lsize = (320, 240)
+picam2 = Picamera2()
+
+com_port = "/dev/ttyACM0"  # Change this to your port
+baud_rate = 9600
+x = serial.Serial(com_port, baud_rate, timeout=1)
+
+# Initialize the CSV file for camera log
+with open('log.csv', mode='a', newline='') as csvfile:
+    spamwriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+    spamwriter.writerow(["Time", "mse", "Temperature (degC)", "Pressure (hPa)", "Altitude (m)", "Humidity (%)", "IR", "Full", "Visible", "Lux", "Duration (s)"])
+
+# Initialize the CSV file for encoder log
+encoder_log_file = 'wheel_log.csv'
+with open(encoder_log_file, mode='a', newline='') as csvfile:
+    wheelwriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+    wheelwriter.writerow(["Encoder Position"])
+
+def camera_process():
+    """ Camera Process Function """
+    video_config = picam2.create_video_configuration(main={"size": (1280, 720), "format": "RGB888"}, lores={"size": lsize, "format": "YUV420"})
+    camera_config = picam2.create_preview_configuration()
+
+    picam2.configure(camera_config)
+    picam2.start_preview(Preview.QT)
+    picam2.configure(video_config)
+
+    encoder = H264Encoder(1000000, repeat=True)
+    encoder.output = CircularOutput()
+
+    picam2.start()
+    picam2.start_encoder(encoder)
+
+    w, h = lsize
+
+    prev = None
+    encoding = False
+    ltime = 0
+
+    while True:
+        cur = picam2.capture_buffer("lores")
+        cur = cur[:w * h].reshape(h, w)
+        if prev is not None:
+            mse = np.square(np.subtract(cur, prev)).mean()
+            if mse > 1.5:
+                if not encoding:
+                    epoch = int(time.time())
+                    human_epoch = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(epoch))
+                    encoder.output.fileoutput = f"{epoch}.h264"
+                    encoder.output.start()
+                    encoding = True
+                    start_time = epoch
+                    print("New Motion", mse, epoch, human_epoch)
+                    data = str(x.readline().decode('utf-8')).rstrip()
+                    if data:
+                        print(data)  # Display the data to the terminal
+                        readings = data.split(",")
+                        clean_readings = []
+                        last_log_row = [human_epoch, mse]
+                        for num_str in readings:
+                            cleaned_reading = float(num_str.strip())
+                            clean_readings.append(cleaned_reading)
+                            last_log_row.append(cleaned_reading)
+
+                    ltime = time.time()
+
+            else:
+                if encoding and time.time() - ltime > 5.0:
+                    encoder.output.stop()
+                    encoding = False
+
+                    stop_time = int(time.time())
+                    duration = stop_time - start_time
+                    print(f"Motion stopped, duration: {duration} seconds")
+
+                    if last_log_row:
+                        last_log_row.append(duration)
+
+                        with open('log.csv', mode='a', newline='') as csvfile:
+                            spamwriter = csv.writer(csvfile, delimiter=',', quotechar=',', quoting=csv.QUOTE_MINIMAL)
+                            spamwriter.writerow(last_log_row)
+
+                        last_log_row = None
+        prev = cur
+
+    picam2.stop_encoder()
+
+def encoder_process():
+    """ Rotary Encoder Process Function """
+    global encoder0Pos, encoderPinALast, n
+
+    with open(encoder_log_file, mode='a', newline='') as csvfile:
+        wheelwriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
+
+        try:
+            while True:
+                n = GPIO.input(encoderA)  # Read the current state of encoder A
+
+                # Detect a rising edge on encoderA
+                if (encoderPinALast == GPIO.LOW) and (n == GPIO.HIGH):
+                    # If encoder A changed from LOW to HIGH, check direction
+                    if GPIO.input(encoderB) == GPIO.LOW:
+                        encoder0Pos += 1  # Clockwise
+                    else:
+                        encoder0Pos -= 1  # Counter-clockwise
+
+                    # Print and log the current position
+                    print(f"Encoder Position: {encoder0Pos}")
+                    wheelwriter.writerow([encoder0Pos])  # Save to CSV
+
+                encoderPinALast = n  # Update the last state of encoder A
+
+                # Debounce delay
+                time.sleep(0.0001)  # 10ms debounce delay
+
+        except KeyboardInterrupt:
+            print("\nExiting...")
+
+        finally:
+            GPIO.cleanup()  # Clean up GPIO on exit
+
+# Create threads for camera and encoder
+camera_thread = threading.Thread(target=camera_process)
+encoder_thread = threading.Thread(target=encoder_process)
+
+# Start the threads
+camera_thread.start()
+encoder_thread.start()
+
+# Wait for both threads to finish
+camera_thread.join()
+encoder_thread.join()
