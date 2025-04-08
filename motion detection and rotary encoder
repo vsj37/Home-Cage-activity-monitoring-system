@@ -5,19 +5,7 @@ import numpy as np
 import csv
 from picamera2.encoders import H264Encoder
 from picamera2.outputs import CircularOutput
-import RPi.GPIO as GPIO
 import threading  # Import threading module for parallel execution
-
-# Initialize global variables for the encoder
-encoder0Pos = 0
-encoderA = 17  # GPIO pin for encoder A
-encoderB = 18  # GPIO pin for encoder B
-encoderPinALast = GPIO.LOW  # Last state of encoder A
-
-# Setup GPIO for the encoder
-GPIO.setmode(GPIO.BCM)  # Use BCM numbering
-GPIO.setup(encoderA, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Set encoder A pin as input
-GPIO.setup(encoderB, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Set encoder B pin as input
 
 # Initialize camera and serial communication
 lsize = (320, 240)
@@ -31,12 +19,6 @@ x = serial.Serial(com_port, baud_rate, timeout=1)
 with open('log.csv', mode='a', newline='') as csvfile:
     spamwriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
     spamwriter.writerow(["Time", "mse", "Temperature (degC)", "Pressure (hPa)", "Altitude (m)", "Humidity (%)", "IR", "Full", "Visible", "Lux", "Duration (s)"])
-
-# Initialize the CSV file for encoder log
-encoder_log_file = 'wheel_log.csv'
-with open(encoder_log_file, mode='a', newline='') as csvfile:
-    wheelwriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-    wheelwriter.writerow(["Encoder Position"])
 
 def camera_process():
     """ Camera Process Function """
@@ -107,48 +89,3 @@ def camera_process():
 
     picam2.stop_encoder()
 
-def encoder_process():
-    """ Rotary Encoder Process Function """
-    global encoder0Pos, encoderPinALast, n
-
-    with open(encoder_log_file, mode='a', newline='') as csvfile:
-        wheelwriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-
-        try:
-            while True:
-                n = GPIO.input(encoderA)  # Read the current state of encoder A
-
-                # Detect a rising edge on encoderA
-                if (encoderPinALast == GPIO.LOW) and (n == GPIO.HIGH):
-                    # If encoder A changed from LOW to HIGH, check direction
-                    if GPIO.input(encoderB) == GPIO.LOW:
-                        encoder0Pos += 1  # Clockwise
-                    else:
-                        encoder0Pos -= 1  # Counter-clockwise
-
-                    # Print and log the current position
-                    print(f"Encoder Position: {encoder0Pos}")
-                    wheelwriter.writerow([encoder0Pos])  # Save to CSV
-
-                encoderPinALast = n  # Update the last state of encoder A
-
-                # Debounce delay
-                time.sleep(0.0001)  # 10ms debounce delay
-
-        except KeyboardInterrupt:
-            print("\nExiting...")
-
-        finally:
-            GPIO.cleanup()  # Clean up GPIO on exit
-
-# Create threads for camera and encoder
-camera_thread = threading.Thread(target=camera_process)
-encoder_thread = threading.Thread(target=encoder_process)
-
-# Start the threads
-camera_thread.start()
-encoder_thread.start()
-
-# Wait for both threads to finish
-camera_thread.join()
-encoder_thread.join()
