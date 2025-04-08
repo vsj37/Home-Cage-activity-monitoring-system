@@ -18,7 +18,7 @@ x = serial.Serial(com_port, baud_rate, timeout=1)
 # Initialize the CSV file for camera log
 with open('log.csv', mode='a', newline='') as csvfile:
     spamwriter = csv.writer(csvfile, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
-    spamwriter.writerow(["Time", "mse", "Temperature (degC)", "Pressure (hPa)", "Altitude (m)", "Humidity (%)", "IR", "Full", "Visible", "Lux", "Duration (s)"])
+    spamwriter.writerow(["Time", "mse", "Temperature (degC)", "Pressure (hPa)", "Humidity (%)", "Full", "currentMillis", "Duration (s)"])
 
 def camera_process():
     """ Camera Process Function """
