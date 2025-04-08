@@ -10,6 +10,18 @@ Adafruit_TSL2591 tsl = Adafruit_TSL2591(2591);
 Adafruit_BME280 bme; // I2C
 
 #define SEALEVELPRESSURE_HPA (1013.25)
+#define encoder0PinA 10          // sensor A of rotary encoder
+#define encoder0PinB 11          // sensor B of rotary encoder
+
+float samplingFrequency = 120; // frequency to send new values to computer (Hz)
+const long interval = 1000 / (samplingFrequency);  // sampling interval to send new values (ms)
+unsigned long startMillis;  // sample timer that resets each time new data is sent
+unsigned long currentMillis; // rolling timer to check if it's time to send new data
+
+// variables for rotary encoder
+volatile unsigned int encoder0Pos = 0;    // variable for counting ticks of rotary encoder
+boolean A_set;
+boolean B_set;
 
 void displaySensorDetails(void) {
     sensor_t sensor;
@@ -23,7 +35,7 @@ void displaySensorDetails(void) {
     Serial.print(F("Resolution:   ")); Serial.print(sensor.resolution, 4); Serial.println(F(" lux"));
     Serial.println(F("------------------------------------"));
     Serial.println(F(""));
-    delay(500);
+    
 }
 
 void configureSensor(void) {
@@ -50,6 +62,10 @@ void setup() {
     Serial.begin(9600);
     while (!Serial);  // Wait for Serial to initialize
 
+      // interrupts for rotary encoder
+    attachInterrupt(digitalPinToInterrupt(encoder0PinA), doEncoderA, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(encoder0PinB), doEncoderB, CHANGE);
+
     // Initialize BME280
    
     unsigned status = bme.begin();
@@ -71,6 +87,34 @@ void setup() {
     configureSensor();
 }
 
+void doEncoderA() { // Interrupt on A changing state
+  // Low to High transition?
+  if (digitalRead(encoder0PinA) == HIGH) {
+    A_set = true;
+    if (!B_set) {
+      encoder0Pos = encoder0Pos + 1;
+    }
+  }
+  // High-to-low transition?
+  if (digitalRead(encoder0PinA) == LOW) {
+    A_set = false;
+  }
+}
+
+void doEncoderB() { // Interrupt on B changing state
+  // Low-to-high transition?
+  if (digitalRead(encoder0PinB) == HIGH) {
+    B_set = true;
+    if (!A_set) {
+      encoder0Pos = encoder0Pos - 1;
+    }
+  }
+  // High-to-low transition?
+  if (digitalRead(encoder0PinB) == LOW) {
+    B_set = false;
+  }
+}
+
 void loop() {
 
     // Read and display values from BME280
@@ -85,21 +129,22 @@ void loop() {
     uint16_t full = lum & 0xFFFF;
 
     // Prepare CSV output
+     currentMillis = millis();  //get the current "time" (the number of milliseconds since the program started)
+  if (currentMillis - startMillis >= interval)  //test whether the period has elapsed
+  {
+    Serial.print(encoder0Pos);// Wheel raw input
+    Serial.print("\t");
     Serial.print(temperature);
-    Serial.print(",");
+    Serial.print("\t");
     Serial.print(pressure);
-    Serial.print(",");
-    Serial.print(altitude);
-    Serial.print(",");
+    Serial.print("\t");
     Serial.print(humidity);
-    Serial.print(",");
-    Serial.print(ir);
-    Serial.print(",");
+    Serial.print("\t");
     Serial.print(full);
-    Serial.print(",");
-    Serial.print(full - ir);
-    Serial.print(",");
-    Serial.println(tsl.calculateLux(full, ir), 6);  // Last value with 6 decimal places
-
-    delay(1000);  // Delay between readings
+    Serial.print("\t");
+    Serial.print(currentMillis);// Arduino timestamp
+    Serial.print("\n");
+    startMillis = currentMillis;  // Last value with 6 decimal places
+  }
+    
 }
